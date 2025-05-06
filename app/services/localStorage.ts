@@ -19,9 +19,31 @@ export interface FragranceNote {
   favourite: boolean | null;
 }
 
-const STORAGE_KEY_PREFIX = 'fragrance_note_';
+export interface UserCreatedFragrance {
+  fragrance_name: string;
+  notes: {
+    top_notes: string[];
+    middle_notes: string[];
+    base_notes: string[];
+  };
+  description: string;
+  imageUri?: string;
+  season: string;
+  pricePoint: string;
+  inventoryStatus: string;
+  longevityHours: string;
+  rating: string;
+  sillageRating: string;
+  thoughts: string;
+  remindsOf?: string;
+  favourite: boolean;
+  createdAt: number; // timestamp
+}
 
-// Saves a user’s note for a specific fragrance into ourlocal storage
+const STORAGE_KEY_PREFIX = 'fragrance_note_';
+const USER_FRAGRANCE_KEY_PREFIX = 'user_fragrance_';
+
+// Saves a user's note for a specific fragrance into ourlocal storage
 export const saveFragranceNote = async (fragranceId: string, note: FragranceNote): Promise<void> => {
   try {
     // Build a unique storage key by appending the fragrance ID to our prefix
@@ -94,4 +116,64 @@ export const loadAllFragranceNotes = async (): Promise<Record<string, FragranceN
     return {};
   }
 };
- 
+
+// Function to save a user-created fragrance
+export const saveUserFragrance = async (fragrance: UserCreatedFragrance): Promise<void> => {
+  try {
+    const key = `${USER_FRAGRANCE_KEY_PREFIX}${fragrance.fragrance_name}`;
+    console.log('Saving user fragrance with key:', key);
+    console.log('Full fragrance data:', JSON.stringify(fragrance));
+    await AsyncStorage.setItem(key, JSON.stringify(fragrance));
+    console.log('Successfully saved fragrance with key:', key);
+    
+    // Verify it was saved correctly
+    const saved = await AsyncStorage.getItem(key);
+    if (saved) {
+      console.log('Verified save - fragrance available with key:', key);
+    } else {
+      console.error('Save verification failed - fragrance not found with key:', key);
+    }
+  } catch (error) {
+    console.error('Error saving user fragrance:', error);
+  }
+};
+
+// Function to load all user-created fragrances
+export const loadUserFragrances = async (): Promise<UserCreatedFragrance[]> => {
+  try {
+    const keys = await AsyncStorage.getAllKeys();
+    console.log('All AsyncStorage keys:', keys);
+    
+    const userFragranceKeys = keys.filter(key => key.startsWith(USER_FRAGRANCE_KEY_PREFIX));
+    console.log('User fragrance keys:', userFragranceKeys);
+    
+    const results: UserCreatedFragrance[] = [];
+    
+    await Promise.all(
+      userFragranceKeys.map(async (key) => {
+        const data = await AsyncStorage.getItem(key);
+        if (data) {
+          const parsed = JSON.parse(data);
+          console.log('Loaded user fragrance:', parsed.fragrance_name);
+          results.push(parsed);
+        }
+      })
+    );
+    
+    return results;
+  } catch (error) {
+    console.error('Error loading user fragrances:', error);
+    return [];
+  }
+};
+
+// Function to delete a user-created fragrance
+export const deleteUserFragrance = async (fragranceName: string): Promise<void> => {
+  try {
+    const key = `${USER_FRAGRANCE_KEY_PREFIX}${fragranceName}`;
+    await AsyncStorage.removeItem(key);
+    console.log(`Successfully deleted fragrance with key: ${key}`);
+  } catch (error) {
+    console.error('Error deleting user fragrance:', error);
+  }
+}; 

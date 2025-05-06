@@ -1,15 +1,16 @@
-import { Picker } from '@react-native-picker/picker';
 import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { FlatList, Modal, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
-import { FragranceCard } from './components/FragranceCard';
-import { ThemedText } from './components/ThemedText';
-import { ThemedView } from './components/ThemedView';
-import { fetchFragrances, Fragrance } from './services/api';
-import { loadAllFragranceNotes } from './services/localStorage';
+import { FlatList, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-// Make constant inventory options read only - thats what the as as const is doing
+import { Picker } from '@react-native-picker/picker';
+import { createStackNavigator } from '@react-navigation/stack';
+import { FragranceCard } from './components/FragranceCard';
+import { fetchFragrances, Fragrance } from './services/api';
+import { deleteUserFragrance, loadAllFragranceNotes, loadUserFragrances } from './services/localStorage';
+
+// Add SOURCE_FILTERS constant
+const SOURCE_FILTERS = ['All', 'My Collection', 'API'] as const;
 const INVENTORY_STATUSES = [ 'All', '30ML Bottle', '50ML Bottle', '75ML Bottle', '100ML Bottle', '2 ML Sample', '1.5 ML Sample', '1 ML Sample', 'Don\'t Have', 'Want'] as const;
 const SEASONS = ['All', 'Summer', 'Fall', 'Winter', 'Spring' ] as const;
 const PRICE_POINTS = ['All', '1 - 30', '31 - 70', '71 - 110', '111 - 150', '151 - 200', '201 - 250', '251 - 300'] as const;
@@ -26,6 +27,7 @@ type InventoryStatus = typeof INVENTORY_STATUSES[number];
 type PriceFilter = typeof PRICE_POINTS[number];
 type LongevityFilter = typeof LONGEVITY_RANGES[number];
 type FriendsFilter = typeof FRIENDS[number];
+type SourceFilter = typeof SOURCE_FILTERS[number];
 
 
 // Define the merged data structure that is extending fields from our Fragrance Data Interface
@@ -35,9 +37,13 @@ interface MergedFragrance extends Fragrance {
   friends?: string[] | null;
   price_point?: string | null;
   longevity?: string | null;
+  isUserCreated?: boolean;
 }
 
-export default function HomeScreen() {
+// Define the Stack Navigator
+const Stack = createStackNavigator();
+
+function HomeScreen() {
   const [fragrances, setFragrances] = useState<MergedFragrance[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<InventoryStatus>('All');
@@ -50,6 +56,7 @@ export default function HomeScreen() {
   const [priceFilter, setPriceFilter] = useState<PriceFilter>('All');
   const [longevityFilter, setLongevityFilter] = useState<LongevityFilter>('All');
   const [friendsFilter, setFriendsFilter] = useState<FriendsFilter>('All');
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('All');
   const [showFilterModal, setShowFilterModal] = useState(false);
 
   // router is used to navigate to the fragrance details screen
@@ -74,6 +81,30 @@ export default function HomeScreen() {
     
     // Load user notes from AsyncStorage
     const userNotes = await loadAllFragranceNotes();
+    
+    // Load user-created fragrances
+    const userCreatedFragrances = await loadUserFragrances();
+    
+    // DEBUG: inspect loaded user-created fragrances
+    console.log(`Loaded ${userCreatedFragrances.length} user-created fragrances`);
+    
+    
+    // Convert user-created fragrances to match the API format
+    const userFragrancesFormatted = userCreatedFragrances.map(userFrag => ({
+      fragrance_name: userFrag.fragrance_name,
+      notes: userFrag.notes,
+      description: userFrag.description,
+      imageUrl: userFrag.imageUri || '', // Use imageUri as imageUrl
+      // Include user data directly in the object
+      inventoryStatus: userFrag.inventoryStatus,
+      season: userFrag.season,
+      price_point: userFrag.pricePoint,
+      longevity: userFrag.longevityHours,
+      // Convert friendInventories to just an array of friend names
+      friends: [],
+      // Flag to identify user-created fragrances
+      isUserCreated: true
+    }));
     
     // Merge API data with user data
     // Map takes in an array -> does an action to all elements in that array -> spits out a new array with the new actioned data
@@ -107,10 +138,12 @@ export default function HomeScreen() {
         price_point: userNote?.pricePoint || null,
         longevity: userNote?.longevityHours || null,
         friends: friendNames.length > 0 ? friendNames : null,
+        isUserCreated: false
       };
     });
     
-    setFragrances(mergedData);
+    // Combine API fragrances with user-created fragrances
+    setFragrances([...mergedData, ...userFragrancesFormatted]);
   };
 
   // Apply both search and status filters
@@ -122,37 +155,38 @@ export default function HomeScreen() {
     // Same for season, matchesPrice,
     const matchesSeason = seasonFilter === 'All' || fragrance.season === seasonFilter;
     const matchesPrice = priceFilter === 'All' || fragrance.price_point === priceFilter;
-
-
     const matchesLongevity = (() => {
       if (longevityFilter === 'All') return true;
       if (!fragrance.longevity || fragrance.longevity === 'N/A') return false;
       
-      // calculation for hours
-      const hours = parseInt(fragrance.longevity, 10); // base 10 decimal
-      if (isNaN(hours)) return false; 
-      
-      //  return the number of hours that is a string with cases that correlates to the int version of it.
-      switch (longevityFilter) {
-        case '1 - 3': return hours >= 1 && hours <= 3;
-        case '4 - 6': return hours >= 4 && hours <= 6;
-        case '7 - 12': return hours >= 7 && hours <= 12;
-        case '13+': return hours >= 13;
-        default: return false;
-      }
+      return fragrance.longevity === longevityFilter;
     })();
-
-
     const matchesFriend = friendsFilter === 'All' || (fragrance.friends ?? []).includes(friendsFilter); // If fragrance.friends is null make it an empty list instead, and check if the list inludes the ui filter of a friend
 
+    
+    // Add source filter logic
+    const matchesSource = (() => {
+      if (sourceFilter === 'All') return true;
+      if (sourceFilter === 'My Collection') return fragrance.isUserCreated === true;
+      if (sourceFilter === 'API') return fragrance.isUserCreated === false;
+      return true;
+    })();
+
     // Return all the search results back
-    return matchesSearch && matchesMyInventory && matchesSeason && matchesPrice && matchesLongevity && matchesFriend;
+    return matchesSearch && matchesMyInventory && matchesSeason && matchesPrice && matchesLongevity && matchesFriend && matchesSource;
   });
 
   const handleFragrancePress = (id: string) => {
-
     // send id param to fragrance page
     router.push(`/fragrance/${id}`);
+  };
+
+  const handleFragranceDelete = async (fragranceName: string) => {
+    // Delete the fragrance from local storage
+    await deleteUserFragrance(fragranceName);
+    
+    // Refresh the list
+    loadFragrancesWithUserData();
   };
 
   const handleFilterPress = () => {
@@ -166,64 +200,57 @@ export default function HomeScreen() {
   };
 
   return (
-    <ThemedView style={styles.container}>
+    <View style={styles.container}>
       {/* Search header with label and filter button */}
       <View style={styles.searchContainer}>
         <View style={styles.searchHeader}>
-          <ThemedText type="subtitle" style={styles.searchLabel}>Search Fragrances</ThemedText>
-          <TouchableOpacity style={styles.filterButton} onPress={handleFilterPress}>
-            <ThemedText>Filter</ThemedText>
-          </TouchableOpacity>
+          <Text style={styles.searchLabel}>Search Fragrances</Text>
+          <View style={styles.buttonContainer}>
+            <TouchableOpacity style={styles.filterButton} onPress={handleFilterPress}>
+              <Text style={styles.filterButtonText}>Filter</Text>
+            </TouchableOpacity>
+          </View>
         </View>
         <TextInput
           style={styles.searchInput}
           value={searchQuery}
           onChangeText={setSearchQuery}
           placeholder="Type to search..."
-          placeholderTextColor="#6664"
+          placeholderTextColor="#777777"
         />
       </View>
       
-     
-     
-      {
-        /*This code provides a way for users to manage active filters. 
-        Users can easily reset individual filters by tapping on them
-        This entire container is hidden if no filters are active*/
-
-         /*Checks if any of the filters are active (if any one of them is not the default all)
-         When at least one filter is active, it renders a <View>
-        
-        
-        Tried to figure out how we could show a reset button for the filter only if our filter was active.
-        I tried to implement on my own and got stuck in my approach. Turned to Claude 3.7 coding assistant for help taking advice with boolean logic*/
-        
-        // Start of AI Code
-        (statusFilter !== 'All' || seasonFilter !== 'All' || priceFilter !== 'All' || longevityFilter !== 'All' || friendsFilter !== 'All') && (
+      {/* Active filters display */}
+      {(statusFilter !== 'All' || seasonFilter !== 'All' || priceFilter !== 'All' || longevityFilter !== 'All' || friendsFilter !== 'All' || sourceFilter !== 'All') && (
         <View style={styles.activeFilterContainer}>
           {statusFilter !== 'All' && (
             <TouchableOpacity onPress={() => setStatusFilter('All')}>
-              <ThemedText style={styles.clearFilter}>Status: {statusFilter}</ThemedText>
+              <Text style={styles.clearFilter}>Status: {statusFilter}</Text>
             </TouchableOpacity>
           )}
           {seasonFilter !== 'All' && (
             <TouchableOpacity onPress={() => setSeasonFilter('All')}>
-              <ThemedText style={styles.clearFilter}>Season: {seasonFilter}</ThemedText>
+              <Text style={styles.clearFilter}>Season: {seasonFilter}</Text>
             </TouchableOpacity>
           )}
           {priceFilter !== 'All' && (
             <TouchableOpacity onPress={() => setPriceFilter('All')}>
-              <ThemedText style={styles.clearFilter}>Price: {priceFilter}</ThemedText>
+              <Text style={styles.clearFilter}>Price: {priceFilter}</Text>
             </TouchableOpacity>
           )}
           {longevityFilter !== 'All' && (
             <TouchableOpacity onPress={() => setLongevityFilter('All')}>
-              <ThemedText style={styles.clearFilter}>Longevity: {longevityFilter}</ThemedText>
+              <Text style={styles.clearFilter}>Longevity: {longevityFilter}</Text>
             </TouchableOpacity>
           )}
           {friendsFilter !== 'All' && (
             <TouchableOpacity onPress={() => setFriendsFilter('All')}>
-              <ThemedText style={styles.clearFilter}>Friends: {friendsFilter}</ThemedText>
+              <Text style={styles.clearFilter}>Friends: {friendsFilter}</Text>
+            </TouchableOpacity>
+          )}
+          {sourceFilter !== 'All' && (
+            <TouchableOpacity onPress={() => setSourceFilter('All')}>
+              <Text style={styles.clearFilter}>Source: {sourceFilter}</Text>
             </TouchableOpacity>
           )}  
         </View>
@@ -256,30 +283,36 @@ export default function HomeScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <ScrollView contentContainerStyle={styles.modalScrollContent} nestedScrollEnabled={true}>
-
-              <ThemedText type="title" style={styles.modalTitle}>Filter Options</ThemedText>
-
-              <ThemedText type="subtitle" style={styles.modalSubtitle}>Filter by Inventory Status</ThemedText>
+              <Text style={styles.modalTitle}>Filter Options</Text>
               
-              {/* Pickers for each filter inside the modal - On our IOS its a spinning wheel*/}
+              {/* Source filter - add this first */}
+              <Text style={styles.modalSubtitle}>Source</Text>
               <Picker
-                selectedValue={statusFilter} // Which value is appeared as selected - '50ML'
-                onValueChange={(value) => setStatusFilter(value as InventoryStatus)} // When user picks a new item, the setter updates the new state variable, 
-                // the as tells complier we know that one of the types we are assignig will match one the types of InvetoryStatus
-                
-                
+                selectedValue={sourceFilter}
+                onValueChange={(value) => setSourceFilter(value as SourceFilter)}
+                style={styles.picker}
+                itemStyle={styles.pickerItem}
+              >
+                {SOURCE_FILTERS.map((source) => (
+                  <Picker.Item key={source} label={source} value={source} />
+                ))}
+              </Picker>
+              
+              {/* Inventory Status */}
+              <Text style={styles.modalSubtitle}>Inventory Status</Text>
+              <Picker
+                selectedValue={statusFilter} 
+                onValueChange={(value) => setStatusFilter(value as InventoryStatus)}
                 style={styles.picker}
                 itemStyle={styles.pickerItem}
               >
                 {INVENTORY_STATUSES.map((status) => (
                   <Picker.Item key={status} label={status} value={status} />
-                  // for every status in the array, it returns one <Picker.Item>
-                  // a unique key on lists so it can track items efficiently when the list changes
-                  // label is the human‑readable text you see in the dropdown.
-                  // value is the actual data that gets sent back in onValueChange.
                 ))}
               </Picker>
-              <ThemedText type="subtitle" style={styles.modalSubtitle}>Filter by Season</ThemedText>
+              
+              {/* Season */}
+              <Text style={styles.modalSubtitle}>Season</Text>
               <Picker
                 selectedValue={seasonFilter}
                 onValueChange={(value) => setSeasonFilter(value as SeasonFilter)}
@@ -290,7 +323,9 @@ export default function HomeScreen() {
                   <Picker.Item key={season} label={season} value={season} />
                 ))}
               </Picker>
-              <ThemedText type="subtitle" style={styles.modalSubtitle}>Filter by Price</ThemedText>
+              
+              {/* Price */}
+              <Text style={styles.modalSubtitle}>Price</Text>
               <Picker
                 selectedValue={priceFilter}
                 onValueChange={(value) => setPriceFilter(value as PriceFilter)}
@@ -301,7 +336,9 @@ export default function HomeScreen() {
                   <Picker.Item key={price} label={price} value={price} />
                 ))}
               </Picker>
-              <ThemedText type="subtitle" style={styles.modalSubtitle}>Filter by Longevity</ThemedText>
+              
+              {/* Longevity */}
+              <Text style={styles.modalSubtitle}>Longevity</Text>
               <Picker
                 selectedValue={longevityFilter}
                 onValueChange={(value) => setLongevityFilter(value as LongevityFilter)}
@@ -312,7 +349,9 @@ export default function HomeScreen() {
                   <Picker.Item key={range} label={range} value={range} />
                 ))}
               </Picker>
-              <ThemedText type="subtitle" style={styles.modalSubtitle}>Filter by Friends</ThemedText>
+              
+              {/* Friends */}
+              <Text style={styles.modalSubtitle}>Friends</Text>
               <Picker
                 selectedValue={friendsFilter}
                 onValueChange={(value) => setFriendsFilter(value as FriendsFilter)}
@@ -324,25 +363,29 @@ export default function HomeScreen() {
                 ))}
               </Picker>
               <TouchableOpacity style={styles.applyButton} onPress={closeFilterModal}>
-                <ThemedText style={styles.applyButtonText}>Apply</ThemedText>
+                <Text style={styles.applyButtonText}>Apply</Text>
               </TouchableOpacity>
             </ScrollView>
           </View>
         </View>
       </Modal>
-    </ThemedView>
+    </View>
   );
 }
+
+// Remove the Stack Navigator and App function
+export default HomeScreen;
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#777777', // Dark grey background color
   },
   searchContainer: {
     alignItems: 'flex-start',
     paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: '#fff',
+    paddingVertical: 12,
+    backgroundColor: '#777777', // Slightly lighter grey for the search bar
     zIndex: 1,
     width: '100%',
   },
@@ -354,30 +397,41 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   searchLabel: {
-    // search label style
+    color: '#ffffff', // White text for better contrast
+    fontWeight: 'bold',
+    paddingBottom: 2,
   },
   filterButton: {
-    padding: 8,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 4,
+    padding: 0,
+    paddingEnd: 16,
+    paddingStart: 16,
+    backgroundColor: '#d4bb77',
+    borderRadius: 10,
+    opacity: 0.75,
+  },
+  filterButtonText: {
+    color: '#000000', // Black text for contrast against the yellow button
+    fontSize: 16, // Increase font size
   },
   searchInput: {
     width: '100%',
     height: 40,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: '#555555',
     borderRadius: 8,
     paddingHorizontal: 12,
+    backgroundColor: '#222222', // Dark input field
+    color: '#ffffff', // White text
   },
   activeFilterContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 8,
-    backgroundColor: '#e0e0e0',
+    backgroundColor: '#444444', // Matching the search container
   },
   clearFilter: {
-    color: 'blue',
+    color: '#4fc3f7', // Light blue for better visibility on dark
     fontWeight: 'bold',
   },
   list: {
@@ -392,37 +446,47 @@ const styles = StyleSheet.create({
   modalContent: {
     width: '80%',
     maxHeight: '80%',
-    backgroundColor: 'white',
+    backgroundColor: '#333333', // Dark grey modal
     borderRadius: 10,
-    padding: 20,
+    padding: 15,
     alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
       height: 2,
     },
-    shadowOpacity: 0.25,
+    shadowOpacity: 0.5,
     shadowRadius: 4,
     elevation: 5,
+    borderWidth: 1,
+    borderColor: '#555555',
   },
   modalTitle: {
-    marginBottom: 20,
+    marginBottom: 10,
+    color: '#ffffff',
+    fontWeight: 'bold',
+    fontSize: 18,
   },
   modalSubtitle: {
-    marginTop: 16,
+    marginTop: 8,
+    marginBottom: 0,
     fontWeight: 'bold',
+    color: '#ffffff',
   },
   picker: {
     width: '100%',
-    height: 200,
+    height: 120,
+    color: '#ffffff',
+    marginBottom: 0,
+    marginTop: 0,
   },
   pickerItem: {
-    color: '#000',
+    color: '#ffffff',
     height: 44,
   },
   applyButton: {
-    marginTop: 20,
-    backgroundColor: '#007AFF',
+    marginTop: 12,
+    backgroundColor: '#4fc3f7', // Light blue button
     paddingVertical: 10,
     paddingHorizontal: 20,
     borderRadius: 5,
@@ -432,7 +496,23 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   modalScrollContent: {
-    paddingVertical: 10,
+    paddingVertical: 5,
+    paddingHorizontal: 5,
+  },
+  buttonContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  addButton: {
+    backgroundColor: '#4CAF50',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    marginLeft: 8,
+  },
+  addButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
   },
 });
 

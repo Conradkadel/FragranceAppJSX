@@ -1,22 +1,12 @@
-import React from 'react';
-import {
-  TouchableOpacity,
-  Image,
-  View,
-  StyleSheet,
-} from 'react-native';
-import { ThemedText } from './ThemedText';
+import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Fragrance } from '../services/api';
 
-export interface FragranceCardProps {
-  fragrance: {
-    fragrance_name: string;
-    imageUrl: string;
-    notes: { top_notes: string[] };
-  };
-  onPress: (name: string) => void;
+interface FragranceCardProps {
+  fragrance: Fragrance;
+  onPress: (id: string) => void;
 }
 
-export const FragranceCard: React.FC<FragranceCardProps> = ({ fragrance, onPress }) => {
+export function FragranceCard({ fragrance, onPress }: FragranceCardProps) {
   return (
     <TouchableOpacity
       style={styles.card}
@@ -28,35 +18,47 @@ export const FragranceCard: React.FC<FragranceCardProps> = ({ fragrance, onPress
         resizeMode="contain"
       />
       <View style={styles.content}>
-        <ThemedText type="subtitle" numberOfLines={1}>
+        <Text style={styles.title} numberOfLines={1}>
           {fragrance.fragrance_name}
-        </ThemedText>
-        <ThemedText numberOfLines={2}>
+        </Text>
+        <Text style={styles.subtitle} numberOfLines={2}>
           {(fragrance.notes?.top_notes ?? []).join(', ')}
-        </ThemedText>
+        </Text>
       </View>
     </TouchableOpacity>
   );
-};
+}
 
 const styles = StyleSheet.create({
   card: {
-    width: 150,
-    backgroundColor: '#fff',
-    borderRadius: 8,
+    flex: 1,
     margin: 8,
+    borderRadius: 8,
+    backgroundColor: '#fff',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3,
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
     elevation: 3,
-    overflow: 'hidden',
   },
   image: {
     width: '100%',
     height: 120,
+    borderTopLeftRadius: 8,
+    borderTopRightRadius: 8,
   },
   content: {
     padding: 12,
+  },
+  title: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: 'bold',
+    textAlign: 'center',
   },
 });

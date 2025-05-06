@@ -1,3 +1,4 @@
+import { loadUserFragrances } from './localStorage';
 
 // Define the Fragrance interface, with its data fields
 export interface Fragrance {
@@ -28,9 +29,11 @@ export async function fetchFragrances(): Promise<Fragrance[]> {
     return [];
   }
 }
+
 export async function fetchFragranceById(id: string): Promise<Fragrance | null> {
   try {
-    // Send a GET request to the base API URL
+    // Since we're now handling user fragrances in the FragranceDetailsScreen component,
+    // we only need to fetch from the API here
     const response = await fetch(API_BASE_URL);
 
     if (!response.ok) {
